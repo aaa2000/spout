@@ -4,6 +4,8 @@ namespace Port\Spout;
 
 use Box\Spout\Common\Type;
 use Box\Spout\Reader\ReaderFactory;
+use OutOfBoundsException;
+use Port\Exception\ReaderException;
 use Port\Reader\CountableReader;
 use SeekableIterator;
 
@@ -41,28 +43,48 @@ class SpoutReader implements CountableReader, SeekableIterator
     protected $count;
 
     /**
-     * @param \SplFileObject $file            Excel file
-     * @param integer        $headerRowNumber Optional number of header row
-     * @param integer        $activeSheet     Index of active sheet to read from
+     * @param \SplFileObject $file Excel file
+     * @param int $headerRowNumber Optional number of header row
+     * @param int $activeSheet Index of active sheet to read from
+     * @param bool $shouldPreserveEmptyRows Sets whether empty rows should be returned or skipped
+     *
+     * @throws ReaderException
      */
-    public function __construct(\SplFileObject $file, $headerRowNumber = null, $activeSheet = null)
+    public function __construct(\SplFileObject $file, $headerRowNumber = null, $activeSheet = null, $shouldPreserveEmptyRows = true)
     {
-        $reader = ReaderFactory::create(Type::XLSX);
-        $reader->open($file->getPathname());
+        $reader = $this->createReaderForFile($file, $shouldPreserveEmptyRows);
 
-        if (null !== $activeSheet) {
-            foreach ($reader->getSheetIterator() as $sheet) {
-                if ($sheet->getIndex() === $activeSheet) {
-                    break;
-                }
+        $activeSheet = null === $activeSheet ? 0 : (int) $activeSheet;
+        foreach ($reader->getSheetIterator() as $sheet) {
+            if ($sheet->getIndex() === $activeSheet) {
+                break;
             }
         }
 
+        if (!$reader->getSheetIterator()->valid()) {
+            throw new ReaderException(sprintf('Sheet at index %d is not found', $activeSheet));
+        }
         $this->sheet = $reader->getSheetIterator()->current();
 
         if (null !== $headerRowNumber) {
             $this->setHeaderRowNumber($headerRowNumber);
         }
+    }
+
+    /**
+     * @param \SplFileObject $file
+     * @param $shouldPreserveEmptyRows
+     *
+     * @return \Box\Spout\Reader\XLSX\Reader
+     */
+    private function createReaderForFile(\SplFileObject $file, $shouldPreserveEmptyRows)
+    {
+        /** @var \Box\Spout\Reader\XLSX\Reader $reader */
+        $reader = ReaderFactory::create(Type::XLSX);
+        $reader->setShouldPreserveEmptyRows($shouldPreserveEmptyRows);
+        $reader->open($file->getPathname());
+
+        return $reader;
     }
 
     /**
@@ -121,12 +143,7 @@ class SpoutReader implements CountableReader, SeekableIterator
     {
         $this->sheet->getRowIterator()->rewind();
         if (null !== $this->headerRowNumber) {
-            $dataRowNumber = $this->headerRowNumber + 1;
-            foreach ($this->sheet->getRowIterator() as $index => $row) {
-                if ($index === $dataRowNumber) {
-                    break;
-                }
-            }
+            $this->seekIndex($this->headerRowNumber + 2);
         }
     }
 
@@ -137,14 +154,11 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function setHeaderRowNumber($rowNumber)
     {
+        $rowNumber = (int) $rowNumber;
+        $this->seekIndex($rowNumber + 1);
+        $this->columnHeaders = $this->sheet->getRowIterator()->current();
         $this->headerRowNumber = $rowNumber;
-        foreach ($this->sheet->getRowIterator() as $index => $row) {
-            if ($index === $rowNumber) {
-                $this->columnHeaders = $row;
-                break;
-            }
-        }
-        $this->columnHeaders = $this->worksheet[$rowNumber];
+        $this->sheet->getRowIterator()->next();
     }
 
     /**
@@ -176,11 +190,29 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function seek($position)
     {
-        foreach ($this->sheet->getRowIterator() as $index => $row) {
-            if ($index === $position) {
-                break;
+        $positionIndex = $position + 1;
+        if (null !== $this->headerRowNumber) {
+            $positionIndex += $this->headerRowNumber + 1;
+        }
+
+        $this->seekIndex($positionIndex);
+    }
+
+    /**
+     * Seeks to a row index (one-based)
+     *
+     * @param $index
+     */
+    private function seekIndex($index)
+    {
+        $rowIterator = $this->sheet->getRowIterator();
+        foreach ($rowIterator as $rowIndex => $row) {
+            if ($rowIndex === $index) {
+                return;
             }
         }
+
+        throw new OutOfBoundsException(sprintf('Row number %d is out of range', $index));
     }
 
     /**
@@ -188,9 +220,13 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function count()
     {
-        $count = iterator_count($this->sheet);
+        $count = iterator_count($this->sheet->getRowIterator());
 
-        return $count - (int) $this->headerRowNumber;
+        if (null === $this->headerRowNumber) {
+            return $count;
+        }
+
+        return $count - ($this->headerRowNumber + 1);
     }
 
     /**
