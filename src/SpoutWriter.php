@@ -60,7 +60,7 @@ class SpoutWriter implements Writer
      */
     public function prepare()
     {
-        /** @var  \Box\Spout\Writer\WriterInterface|\Box\Spout\Writer\AbstractMultiSheetsWriter $writer */
+        /** @var \Box\Spout\Writer\WriterInterface|\Box\Spout\Writer\AbstractMultiSheetsWriter $writer */
         $this->writer = WriterFactory::create($this->type);
         $this->writer->openToFile($this->filename);
 

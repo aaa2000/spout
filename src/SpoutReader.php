@@ -2,13 +2,11 @@
 
 namespace Port\Spout;
 
-use Box\Spout\Common\Type;
-use Box\Spout\Reader\ReaderFactory;
+use Box\Spout\Reader\ReaderInterface;
 use OutOfBoundsException;
 use Port\Exception\ReaderException;
 use Port\Reader\CountableReader;
 use SeekableIterator;
-
 
 /**
  * Reads Excel files with the help of Spout
@@ -43,17 +41,14 @@ class SpoutReader implements CountableReader, SeekableIterator
     protected $count;
 
     /**
-     * @param \SplFileObject $file Excel file
+     * @param ReaderInterface $reader
      * @param int $headerRowNumber Optional number of header row
      * @param int $activeSheet Index of active sheet to read from
-     * @param bool $shouldPreserveEmptyRows Sets whether empty rows should be returned or skipped
      *
      * @throws ReaderException
      */
-    public function __construct(\SplFileObject $file, $headerRowNumber = null, $activeSheet = null, $shouldPreserveEmptyRows = true)
+    public function __construct(ReaderInterface $reader, $headerRowNumber = null, $activeSheet = null)
     {
-        $reader = $this->createReaderForFile($file, $shouldPreserveEmptyRows);
-
         $activeSheet = null === $activeSheet ? 0 : (int) $activeSheet;
         foreach ($reader->getSheetIterator() as $sheet) {
             if ($sheet->getIndex() === $activeSheet) {
@@ -69,22 +64,6 @@ class SpoutReader implements CountableReader, SeekableIterator
         if (null !== $headerRowNumber) {
             $this->setHeaderRowNumber($headerRowNumber);
         }
-    }
-
-    /**
-     * @param \SplFileObject $file
-     * @param $shouldPreserveEmptyRows
-     *
-     * @return \Box\Spout\Reader\XLSX\Reader
-     */
-    private function createReaderForFile(\SplFileObject $file, $shouldPreserveEmptyRows)
-    {
-        /** @var \Box\Spout\Reader\XLSX\Reader $reader */
-        $reader = ReaderFactory::create(Type::XLSX);
-        $reader->setShouldPreserveEmptyRows($shouldPreserveEmptyRows);
-        $reader->open($file->getPathname());
-
-        return $reader;
     }
 
     /**
@@ -227,19 +206,5 @@ class SpoutReader implements CountableReader, SeekableIterator
         }
 
         return $count - ($this->headerRowNumber + 1);
-    }
-
-    /**
-     * Get a row
-     *
-     * @param integer $number
-     *
-     * @return array
-     */
-    public function getRow($number)
-    {
-        $this->seek($number);
-
-        return $this->current();
     }
 }
