@@ -4,7 +4,10 @@ namespace Port\Spout\Tests;
 
 use Box\Spout\Common\Type;
 use Box\Spout\Reader\ReaderFactory;
-use Box\Spout\Reader\XLSX\Reader as XlsxReader;
+use Box\Spout\Reader\ReaderInterface;
+use Box\Spout\Reader\SheetInterface;
+use Box\Spout\Writer\WriterFactory;
+use Port\Spout\SpoutReader;
 use Port\Spout\SpoutWriter;
 
 class SpoutWriterTest extends \PHPUnit_Framework_TestCase
@@ -16,10 +19,28 @@ class SpoutWriterTest extends \PHPUnit_Framework_TestCase
         }
     }
 
-    public function testWriteItemAppendWithSheetTitle()
+    public function writerTypeProvider()
+    {
+        yield [Type::XLSX];
+        yield [Type::ODS];
+        yield [Type::CSV];
+    }
+
+    public function sheetWriterTypeProvider()
+    {
+        yield [Type::XLSX];
+        yield [Type::ODS];
+    }
+
+    /**
+     * @dataProvider sheetWriterTypeProvider
+     */
+    public function testWriteItemAppendWithSheetTitle($type)
     {
         $file = tempnam(sys_get_temp_dir(), null);
-        $writer = new SpoutWriter(new \SplFileObject($file, 'w'), 'Sheet 1');
+        $writerFile = WriterFactory::create($type);
+        $writerFile->openToFile($file);
+        $writer = new SpoutWriter($writerFile, 'Sheet 1');
 
         $writer->prepare();
         $writer->writeItem(['first', 'last']);
@@ -36,31 +57,46 @@ class SpoutWriterTest extends \PHPUnit_Framework_TestCase
 
         $writer->finish();
 
-        /** @var \Box\Spout\Reader\XLSX\Reader $excel */
-        $excel = ReaderFactory::create(Type::XLSX);
-        $excel->open($file);
+        $reader = ReaderFactory::create($type);
+        $reader->open($file);
+        $spoutReader = new SpoutReader($reader);
 
-        $sheetOne = $this->getSheetByTitle($excel, 'Sheet 1');
-        $this->assertCount(3, $sheetOne->getRowIterator());
+        $this->assertCount(3, $spoutReader);
+        $this->assertInstanceOf(SheetInterface::class, $this->getSheetByTitle($reader, 'Sheet 1'));
     }
 
-    public function testWriteItemWithoutSheetTitle()
+    /**
+     * @dataProvider writerTypeProvider
+     */
+    public function testWriteItemWithoutSheetTitle($type)
     {
-        $outputFile = new \SplFileObject(tempnam(sys_get_temp_dir(), null));
-        $writer = new SpoutWriter($outputFile);
+        $file = tempnam(sys_get_temp_dir(), null);
+        $writerFile = WriterFactory::create($type);
+        $writerFile->openToFile($file);
+        $writer = new SpoutWriter($writerFile);
 
         $writer->prepare();
 
         $writer->writeItem(['first', 'last']);
 
         $writer->finish();
+
+        $reader = ReaderFactory::create($type);
+        $reader->open($file);
+        $spoutReader = new SpoutReader($reader);
+
+        $this->assertCount(1, $spoutReader);
     }
 
-    public function testHeaderNotPrependedByDefault()
+    /**
+     * @dataProvider writerTypeProvider
+     */
+    public function testHeaderNotPrependedByDefault($type)
     {
         $file = tempnam(sys_get_temp_dir(), null);
-
-        $writer = new SpoutWriter(new \SplFileObject($file, 'w'), null, Type::XLSX);
+        $writerFile = WriterFactory::create($type);
+        $writerFile->openToFile($file);
+        $writer = new SpoutWriter($writerFile);
         $writer->prepare();
         $writer->writeItem([
             'col 1 name'=>'col 1 value',
@@ -69,22 +105,25 @@ class SpoutWriterTest extends \PHPUnit_Framework_TestCase
         ]);
         $writer->finish();
 
-        /** @var \Box\Spout\Reader\XLSX\Reader $excel */
-        $excel = ReaderFactory::create(Type::XLSX);
-        $excel->open($file);
-        /** @var  \Box\Spout\Reader\XLSX\Sheet $sheet */
-        $sheet = current(iterator_to_array($excel->getSheetIterator()));
-        $rows = iterator_to_array($sheet->getRowIterator());
+        $reader = ReaderFactory::create($type);
+        $reader->open($file);
+        $spoutReader = new SpoutReader($reader);
 
+        $rows = iterator_to_array($spoutReader);
         # Values should be at first line
         $this->assertEquals(['col 1 value', 'col 2 value', 'col 3 value'], $rows[1]);
     }
 
-    public function testHeaderPrependedWhenOptionSetToTrue()
+    /**
+     * @dataProvider writerTypeProvider
+     */
+    public function testHeaderPrependedWhenOptionSetToTrue($type)
     {
         $file = tempnam(sys_get_temp_dir(), null);
+        $writerFile = WriterFactory::create($type);
+        $writerFile->openToFile($file);
 
-        $writer = new SpoutWriter(new \SplFileObject($file, 'w'), null, Type::XLSX, true);
+        $writer = new SpoutWriter($writerFile, null, true);
         $writer->prepare();
         $writer->writeItem([
             'col 1 name'=>'col 1 value',
@@ -93,13 +132,10 @@ class SpoutWriterTest extends \PHPUnit_Framework_TestCase
         ]);
         $writer->finish();
 
-        /** @var \Box\Spout\Reader\XLSX\Reader $excel */
-        $excel = ReaderFactory::create(Type::XLSX);
-        $excel->open($file);
-        /** @var  \Box\Spout\Reader\XLSX\Sheet $sheet */
-        /** @var  \Box\Spout\Reader\XLSX\Sheet $sheet */
-        $sheet = current(iterator_to_array($excel->getSheetIterator()));
-        $rows = iterator_to_array($sheet->getRowIterator());
+        $reader = ReaderFactory::create($type);
+        $reader->open($file);
+        $spoutReader = new SpoutReader($reader);
+        $rows = iterator_to_array($spoutReader);
 
         # Check column names at first line
         $this->assertEquals(['col 1 name', 'col 2 name', 'col 3 name'], $rows[1]);
@@ -109,15 +145,15 @@ class SpoutWriterTest extends \PHPUnit_Framework_TestCase
     }
 
     /**
-     * @param \Box\Spout\Reader\XLSX\Reader $excel
+     * @param \Box\Spout\Reader\ReaderInterface $reader
      * @param string $sheetTitle
      *
-     * @return \Box\Spout\Reader\XLSX\Sheet
+     * @return \Box\Spout\Reader\SheetInterface
      */
-    private function getSheetByTitle(XlsxReader $excel, $sheetTitle)
+    private function getSheetByTitle(ReaderInterface $reader, $sheetTitle)
     {
         /** @var \Box\Spout\Reader\XLSX\Sheet $sheet */
-        foreach ($excel->getSheetIterator() as $sheet) {
+        foreach ($reader->getSheetIterator() as $sheet) {
             if ($sheet->getName() === $sheetTitle) {
                 return $sheet;
             }

@@ -3,9 +3,8 @@
 namespace Port\Spout;
 
 use Box\Spout\Writer\AbstractMultiSheetsWriter;
-use Box\Spout\Writer\WriterFactory;
+use Box\Spout\Writer\WriterInterface;
 use Port\Writer;
-use Box\Spout\Common\Type;
 
 /**
  * Writes to an Excel file
@@ -13,17 +12,9 @@ use Box\Spout\Common\Type;
 class SpoutWriter implements Writer
 {
     /**
-     * @var string
-     */
-    protected $filename;
-    /**
      * @var null|string
      */
     protected $sheet;
-    /**
-     * @var string
-     */
-    protected $type;
     /**
      * @var boolean
      */
@@ -42,16 +33,14 @@ class SpoutWriter implements Writer
      * @see http://opensource.box.com/spout/guides/add-data-to-existing-spreadsheet/
      * @see http://opensource.box.com/spout/guides/edit-existing-spreadsheet/
      *
-     * @param \SplFileObject $file  File
-     * @param string         $sheet Sheet title (optional)
-     * @param string         $type  Excel file type (defaults to XLSX)
-     * @param boolean        $prependHeaderRow
+     * @param \Box\Spout\Writer\WriterInterface $writer
+     * @param string $sheet Sheet title (optional)
+     * @param boolean $prependHeaderRow
      */
-    public function __construct(\SplFileObject $file, $sheet = null, $type = Type::XLSX, $prependHeaderRow = false)
+    public function __construct(WriterInterface $writer, $sheet = null, $prependHeaderRow = false)
     {
-        $this->filename = $file->getPathname();
+        $this->writer = $writer;
         $this->sheet = $sheet;
-        $this->type = $type;
         $this->prependHeaderRow = $prependHeaderRow;
     }
 
@@ -60,10 +49,6 @@ class SpoutWriter implements Writer
      */
     public function prepare()
     {
-        /** @var \Box\Spout\Writer\WriterInterface|\Box\Spout\Writer\AbstractMultiSheetsWriter $writer */
-        $this->writer = WriterFactory::create($this->type);
-        $this->writer->openToFile($this->filename);
-
         if (null !== $this->sheet && $this->writer instanceof AbstractMultiSheetsWriter) {
             $this->writer->getCurrentSheet()->setName($this->sheet);
         }

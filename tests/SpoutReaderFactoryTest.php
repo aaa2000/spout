@@ -15,36 +15,39 @@ class SpoutReaderFactoryTest extends \PHPUnit_Framework_TestCase
         }
     }
 
-    public function testGetReaderWithExcelFormat()
+    /**
+     * @dataProvider dataNoColumnHeadersFileProvider
+     */
+    public function testGetReaderWithNoHeaderLine($filePath)
     {
         $factory = new SpoutReaderFactory();
-        $reader = $factory->getReader(new \SplFileObject(__DIR__.'/fixtures/data_column_headers.xlsx'));
+        $reader = $factory->getReader(new \SplFileObject($filePath));
         $this->assertInstanceOf(SpoutReader::class, $reader);
-        $this->assertCount(4, $reader);
+        $this->assertCount(3, $reader);
     }
 
-    public function testGetReaderWithOdsFormat()
+    public function dataNoColumnHeadersFileProvider()
     {
-        $this->markTestSkipped('The ods iterator can\'t be rewind more than once');
-        $factory = new SpoutReaderFactory();
-        $reader = $factory->getReader(new \SplFileObject(__DIR__.'/fixtures/data_column_headers.ods'));
-        $this->assertInstanceOf(SpoutReader::class, $reader);
-        $this->assertCount(4, $reader);
+        yield ['xlsx' => __DIR__.'/fixtures/data_no_column_headers.xlsx'];
+        yield ['ods' => __DIR__.'/fixtures/data_no_column_headers.ods'];
+        yield ['csv' => __DIR__.'/fixtures/data_no_column_headers.csv'];
     }
 
-    public function testGetReaderWithCsvFormat()
-    {
-        $factory = new SpoutReaderFactory();
-        $reader = $factory->getReader(new \SplFileObject(__DIR__.'/fixtures/data_column_headers.csv'));
-        $this->assertInstanceOf(SpoutReader::class, $reader);
-        $this->assertCount(4, $reader);
-    }
-
-    public function testGetReaderWithHeaderLine()
+    /**
+     * @dataProvider dataColumnHeadersFileProvider
+     */
+    public function testGetReaderWithHeaderLine($filePath)
     {
         $factory = new SpoutReaderFactory(0);
-        $reader = $factory->getReader(new \SplFileObject(__DIR__ . '/fixtures/data_column_headers.xlsx'));
+        $reader = $factory->getReader(new \SplFileObject($filePath));
         $this->assertCount(3, $reader);
+    }
+
+    public function dataColumnHeadersFileProvider()
+    {
+        yield ['xlsx' => __DIR__.'/fixtures/data_column_headers.xlsx'];
+        yield ['ods' => __DIR__.'/fixtures/data_column_headers.ods'];
+        yield ['csv' => __DIR__.'/fixtures/data_column_headers.csv'];
     }
 
     public function testGetReaderWithUnknownFormatShouldThrowAnException()

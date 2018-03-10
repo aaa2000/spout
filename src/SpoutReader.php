@@ -2,6 +2,7 @@
 
 namespace Port\Spout;
 
+use Box\Spout\Reader\Exception\IteratorNotRewindableException;
 use Box\Spout\Reader\ReaderInterface;
 use OutOfBoundsException;
 use Port\Exception\ReaderException;
@@ -9,7 +10,7 @@ use Port\Reader\CountableReader;
 use SeekableIterator;
 
 /**
- * Reads Excel files with the help of Spout
+ * Reads Excel, ODS or CSV files with the help of Spout
  *
  * Spout must be installed.
  *
@@ -18,6 +19,16 @@ use SeekableIterator;
  */
 class SpoutReader implements CountableReader, SeekableIterator
 {
+    /**
+     * @var \Box\Spout\Reader\ReaderInterface
+     */
+    protected $reader;
+
+    /**
+     * @var int|null
+     */
+    protected $activeSheet;
+
     /**
      * @var \Box\Spout\Reader\XLSX\Sheet
      */
@@ -36,7 +47,7 @@ class SpoutReader implements CountableReader, SeekableIterator
     /**
      * Total number of rows
      *
-     * @var integer
+     * @var null|integer
      */
     protected $count;
 
@@ -49,21 +60,10 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function __construct(ReaderInterface $reader, $headerRowNumber = null, $activeSheet = null)
     {
-        $activeSheet = null === $activeSheet ? 0 : (int) $activeSheet;
-        foreach ($reader->getSheetIterator() as $sheet) {
-            if ($sheet->getIndex() === $activeSheet) {
-                break;
-            }
-        }
-
-        if (!$reader->getSheetIterator()->valid()) {
-            throw new ReaderException(sprintf('Sheet at index %d is not found', $activeSheet));
-        }
-        $this->sheet = $reader->getSheetIterator()->current();
-
-        if (null !== $headerRowNumber) {
-            $this->setHeaderRowNumber($headerRowNumber);
-        }
+        $this->reader = $reader;
+        $this->headerRowNumber = $headerRowNumber;
+        $this->activeSheet = $activeSheet;
+        $this->reinitialize();
     }
 
     /**
@@ -120,7 +120,7 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function rewind()
     {
-        $this->sheet->getRowIterator()->rewind();
+        $this->reinitialize();
         if (null !== $this->headerRowNumber) {
             $this->seekIndex($this->headerRowNumber + 2);
         }
@@ -166,6 +166,9 @@ class SpoutReader implements CountableReader, SeekableIterator
 
     /**
      * {@inheritdoc}
+     *
+     * WARNING: Seeking position in non-ascending order has performance impacts because the spreadsheet will be read
+     * again from the beginning.
      */
     public function seek($position)
     {
@@ -184,11 +187,16 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     private function seekIndex($index)
     {
+        if ($this->sheet->getRowIterator()->key() > $index) {
+            $this->reinitialize();
+        }
+
         $rowIterator = $this->sheet->getRowIterator();
-        foreach ($rowIterator as $rowIndex => $row) {
-            if ($rowIndex === $index) {
+        while ($rowIterator->valid()) {
+            if ($rowIterator->key() === $index) {
                 return;
             }
+            $rowIterator->next();
         }
 
         throw new OutOfBoundsException(sprintf('Row number %d is out of range', $index));
@@ -199,12 +207,48 @@ class SpoutReader implements CountableReader, SeekableIterator
      */
     public function count()
     {
-        $count = iterator_count($this->sheet->getRowIterator());
-
-        if (null === $this->headerRowNumber) {
-            return $count;
+        $this->reinitialize();
+        $count = 0;
+        while ($this->sheet->getRowIterator()->valid()) {
+            $count++;
+            $this->sheet->getRowIterator()->next();
         }
 
-        return $count - ($this->headerRowNumber + 1);
+        return $count;
+    }
+
+    /**
+     * ODS RowIterator can only be done once, as it is not possible to read an XML file backwards.
+     * @see \Box\Spout\Reader\ODS\RowIterator::rewind()
+     *
+     * The sheet iterator is then rewinded in order to instantiate a new sheet and so a new row iterator.
+     * Move the row iterator on the row after the header row or on the first line if there is no headers.
+     */
+    private function reinitialize()
+    {
+        $activeSheet = null === $this->activeSheet ? 0 : (int)$this->activeSheet;
+        foreach ($this->reader->getSheetIterator() as $sheet) {
+            if ($sheet->getIndex() === $activeSheet) {
+                break;
+            }
+        }
+
+        if (!$this->reader->getSheetIterator()->valid()) {
+            throw new ReaderException(sprintf('Sheet at index %d is not found', $activeSheet));
+        }
+        $this->sheet = $this->reader->getSheetIterator()->current();
+
+        try {
+            // Require for the XLSX format in order to load data
+            $this->sheet->getRowIterator()->rewind();
+        } catch (IteratorNotRewindableException $e) {
+            // Ods row iterator can be rewinded only once
+        }
+
+        if (null !== $this->headerRowNumber) {
+            $this->setHeaderRowNumber($this->headerRowNumber);
+        } else {
+            $this->seekIndex(1);
+        }
     }
 }
